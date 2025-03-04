@@ -2,8 +2,10 @@ import config
 import discord
 from discord.ext import commands
 from discord import app_commands
+import yt_dlp
+import asyncio
 
-
+'''
 class Client(commands.Bot):
     async def on_ready(self):
         print(f"bot {self.user} ist online")
@@ -20,49 +22,61 @@ class Client(commands.Bot):
 
        if message.content.startswith("just"):
             await message.channel.send(f"put the fries in the bag bro {message.author}")
-
+'''
 
 Guild_ID = discord.Object(id="905458434135191562")
 intentss = discord.Intents.default()
 intentss.message_content = True
-client = Client(command_prefix="!", intents = intentss)
-
-@client.tree.command(name="antwort", description="das ist ein test", guild=Guild_ID)
-
-async def test(interaction: discord.Interaction, antwort:str):
-    await interaction.response.send_message(antwort)
-
-@client.tree.command(name="embed", description="das ist ein test", guild=Guild_ID)
+intentss.voice_states = True
+#client = Client(command_prefix="!", intents = intentss)
+FFMPEG_OPTIONS = {"options" : "-vn"}
+YDL_OPTIONS = {"format" : "bestaudio" , "noplaylist" : True}
 
 
-async def test(interaction: discord.Interaction,):
-    embedd = discord.Embed(title="Klick auf diesen Link", url="https://www.youtube.com/watch?v=dQw4w9WgXcQ", description="das ist ein test", color=discord.Color.blue())
-    embedd.set_thumbnail(url="https://i.imgur.com/M6sbDof.png")
-    await interaction.response.send_message(embed=embedd)
+class MusicBot(commands.Cog):
+    def __init__(self, client):
+        self.client = client
+        self.queue = []
+@commands.command()
+async def play(self, ctx,*, search):
+    voice_channel = ctx.author.voice.channel if ctx.author.voice else None
+    if not voice_channel:
+        return await ctx.send("du bist nicht im vc")
+    if not ctx.voice_client:
+        await voice_channel.connect()
 
-@client.tree.command(name="embed2", description="das ist ein test", guild=Guild_ID)
-async def test(interaction: discord.Interaction,):
-    embedd = discord.Embed(title="klick auf diesen Link", url="https://youtu.be/OKi9QCIpc6o?si=w3y1_zW25kq89r33&t=39", description="", color=discord.Color.red())
-    embedd.set_thumbnail(url="https://media1.tenor.com/m/19iF9aRGdbkAAAAd/king-von-king-von-stare.gif")
-    embedd.add_field(name="", value="Wie hendrik mich anguckt weil ich um 3 uhr nachts nicht mehr im voice chillen möchte")
-    embedd.set_author(name="King Von" , icon_url="https://i.ytimg.com/vi/8OXlDMNRu_Q/hq720.jpg?sqp=-oaymwEhCK4FEIIDSFryq4qpAxMIARUAAAAAGAElAADIQj0AgKJD&rs=AOn4CLBrRvVdU8r9K15kZfPCjjszwAsn4w")
-    await interaction.response.send_message(embed=embedd)
+    async with ctx.typing():
+        with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
+            info = ydl.extract_info(f"ytsearch:{search}", download = False)
+            if "entrie" in info:
+                info = info["entries"][0]
+            url = info["url"]
+            title = info["title"]
+            self.queue.append((url,title))
+            await ctx.send(f"zur warteschlange hinzugefügt: **{title}**")
+        if not ctx.voice_client.is_playing():
+            await self.play_next(ctx)
 
-class View(discord.ui.View):
-    @discord.ui.button(label="klick nicht drauf!", style=discord.ButtonStyle.red, emoji="💀")
-    async def button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
-        
-        embed = discord.Embed(
-            description="das gefällt mir garnicht",  
-            color=discord.Color.red()  
-        )
-        embed.set_image(url="https://media.tenor.com/WdOoQoAnB2wAAAAe/king-von-rapper.png") 
-        
-        # Sende das Embed
-        await interaction.response.send_message(embed=embed)
+async def play_next(self,ctx):
+    if self.queue:
+        url, title = self.queue.pop(0)
+        source = await discord.FFmpegOpusAudio.from_probe(url, **FFMPEG_OPTIONS)
+        ctx.voice_client.play(source,after=lambda _:self.client.loop.create_task(self.play_next(ctx)))
+        await ctx.send(f"jetzt spielt **{title}**")
+    elif not ctx.voice_client.is_playing():
+        await ctx.send("queue is empty!")
 
-@client.tree.command(name="button", description="das ist ein test", guild=Guild_ID)
-async def button(interaction: discord.Interaction):
-    await interaction.response.send_message(view=View())   
+@commands.command()
+async def skip (self,ctx):
+    if ctx.voice_client and ctx.voice_client.is_playing():
+        ctx.voice_client.stop()
+        await ctx.send("geskipt")
+client = commands.Bot(command_prefix="!", intents = intentss)
 
-client.run(config.token)
+async def main():
+    await client.add_cog(MusicBot(client))
+    await client.start(config.token)
+
+
+
+asyncio.run(main())
